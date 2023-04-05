@@ -1,14 +1,14 @@
 ## @file
-# This is a host-based unit test for the VariableLockRequestToLock shim.
+# Unit test suite for the UefiSortLib using Google Test
 #
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) 2022, Intel Corporation. All rights reserved.
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 ##
 
 [Defines]
   INF_VERSION         = 0x00010017
-  BASE_NAME           = VariableLockRequestToLockUnitTest
-  FILE_GUID           = A7388B6C-7274-4717-9649-BDC5DFD1FCBE
+  BASE_NAME           = UefiSortLibGoogleTest
+  FILE_GUID           = 78FB0BEE-D0EA-4E1A-BD38-67458C8ECDEF
   VERSION_STRING      = 1.0
   MODULE_TYPE         = HOST_APPLICATION
 
@@ -19,8 +19,7 @@
 #
 
 [Sources]
-  VariableLockRequestToLockUnitTest.c
-  ../VariableLockRequestToLock.c
+  UefiSortLibGoogleTest.cpp
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -28,9 +27,5 @@
   UnitTestFrameworkPkg/UnitTestFrameworkPkg.dec
 
 [LibraryClasses]
-  UnitTestLib
-  DebugLib
-  VariablePolicyLib
-  VariablePolicyHelperLib
-  BaseMemoryLib
-  MemoryAllocationLib
+  GoogleTestLib
+  UefiSortLib

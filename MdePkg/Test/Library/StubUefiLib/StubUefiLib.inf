@@ -20,8 +20,9 @@
   LIBRARY_CLASS                  = UefiLib|HOST_APPLICATION
 
 
+
 #
-#  VALID_ARCHITECTURES           = IA32 X64 EBC
+#  VALID_ARCHITECTURES           = IA32 X64
 #
 
 [Sources]

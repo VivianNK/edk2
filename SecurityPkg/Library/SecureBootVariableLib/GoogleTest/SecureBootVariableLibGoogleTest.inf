@@ -1,14 +1,14 @@
 ## @file
-# This is a host-based unit test for the VariableLockRequestToLock shim.
+# Unit test suite for the SecureBootVariableLib using Google Test
 #
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) 2022, Intel Corporation. All rights reserved.
 # SPDX-License-Identifier: BSD-2-Clause-Patent
 ##
 
 [Defines]
   INF_VERSION         = 0x00010017
-  BASE_NAME           = VariableLockRequestToLockUnitTest
-  FILE_GUID           = A7388B6C-7274-4717-9649-BDC5DFD1FCBE
+  BASE_NAME           = SecureBootVariableLibGoogleTest
+  FILE_GUID           = C88372AB-726B-4344-A250-6C7F826C874E
   VERSION_STRING      = 1.0
   MODULE_TYPE         = HOST_APPLICATION
 
@@ -19,18 +19,14 @@
 #
 
 [Sources]
-  VariableLockRequestToLockUnitTest.c
-  ../VariableLockRequestToLock.c
+  SecureBootVariableLibGoogleTest.cpp
 
 [Packages]
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
+  SecurityPkg/SecurityPkg.dec
   UnitTestFrameworkPkg/UnitTestFrameworkPkg.dec
 
 [LibraryClasses]
-  UnitTestLib
-  DebugLib
-  VariablePolicyLib
-  VariablePolicyHelperLib
-  BaseMemoryLib
-  MemoryAllocationLib
+  GoogleTestLib
+  SecureBootVariableLib
