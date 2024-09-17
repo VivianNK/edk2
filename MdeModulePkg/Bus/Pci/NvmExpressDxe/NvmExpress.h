@@ -68,17 +68,13 @@ extern EFI_DRIVER_SUPPORTED_EFI_VERSION_PROTOCOL  gNvmExpressDriverSupportedEfiV
 #define NVME_CCQ_SIZE  1                                // Number of I/O completion queue entries, which is 0-based
 
 //
-// Number of asynchronous I/O submission queue entries, which is 0-based.
-// The asynchronous I/O submission queue size is 4kB in total.
-//
-#define NVME_ASYNC_CSQ_SIZE  63
-//
 // Number of asynchronous I/O completion queue entries, which is 0-based.
 // The asynchronous I/O completion queue size is 4kB in total.
 //
-#define NVME_ASYNC_CCQ_SIZE  255
+#define NVME_ASYNC_CCQ_SIZE  63
 
-#define NVME_MAX_QUEUES  3                              // Number of queues supported by the driver
+// This number should be acquired using the GetFeatures for the spec defined Number of Queues feature.
+#define NVME_MAX_QUEUES  3  // Number of queues supported by the driver
 
 //
 // FormatNVM Admin Command LBA Format (LBAF) Mask
