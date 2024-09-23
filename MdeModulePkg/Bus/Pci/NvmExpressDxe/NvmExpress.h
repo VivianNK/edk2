@@ -61,20 +61,23 @@ extern EFI_DRIVER_SUPPORTED_EFI_VERSION_PROTOCOL  gNvmExpressDriverSupportedEfiV
 #define PCI_CLASS_MASS_STORAGE_NVM  0x08                // mass storage sub-class non-volatile memory.
 #define PCI_IF_NVMHCI               0x02                // mass storage programming interface NVMHCI.
 
-#define NVME_ASQ_SIZE  1                                // Number of admin submission queue entries, which is 0-based
-#define NVME_ACQ_SIZE  1                                // Number of admin completion queue entries, which is 0-based
-
-#define NVME_CSQ_SIZE  1                                // Number of I/O submission queue entries, which is 0-based
-#define NVME_CCQ_SIZE  1                                // Number of I/O completion queue entries, which is 0-based
-
-//
-// Number of asynchronous I/O completion queue entries, which is 0-based.
-// The asynchronous I/O completion queue size is 4kB in total.
-//
-#define NVME_ASYNC_CCQ_SIZE  63
-
 // This number should be acquired using the GetFeatures for the spec defined Number of Queues feature.
-#define NVME_MAX_QUEUES  3  // Number of queues supported by the driver
+// Number of queues supported by the driver
+#define NVME_MAX_QUEUES  3
+
+// Determines if the queues require physically contiguous memory
+#define NVME_PHYSICALLY_CONTIGUOUS  0x01
+
+// I/O Submission Queue Entry size as defined in NVMExpress Spec Version ... Section 3.1.3.5
+// This value is in bytes and is specified as a power of two (2^n)
+#define NVME_IOSQES 6
+
+// I/O Submission Queue Entry size as defined in NVMExpress Spec Version ... Section 3.1.3.5
+// This value is in bytes and is specified as a power of two (2^n)
+#define NVME_IOCQES 4
+
+// Default queue size (number of entries) for the controller, which is 0-based
+#define NVME_QUEUE_SIZE_DEFAULT 255                          
 
 //
 // FormatNVM Admin Command LBA Format (LBAF) Mask
@@ -140,15 +143,6 @@ struct _NVME_CONTROLLER_PRIVATE_DATA {
   //
   NVME_ADMIN_CONTROLLER_DATA            *ControllerData;
 
-  //
-  // 6 x 4kB aligned buffers will be carved out of this buffer.
-  // 1st 4kB boundary is the start of the admin submission queue.
-  // 2nd 4kB boundary is the start of the admin completion queue.
-  // 3rd 4kB boundary is the start of I/O submission queue #1.
-  // 4th 4kB boundary is the start of I/O completion queue #1.
-  // 5th 4kB boundary is the start of I/O submission queue #2.
-  // 6th 4kB boundary is the start of I/O completion queue #2.
-  //
   UINT8          *Buffer;
   UINT8          *BufferPciAddr;
 

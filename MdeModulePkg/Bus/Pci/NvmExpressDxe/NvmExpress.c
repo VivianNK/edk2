@@ -582,14 +582,16 @@ ProcessAsyncTaskList (
   EFI_BLOCK_IO2_TOKEN           *Token;
   BOOLEAN                       HasNewItem;
   EFI_STATUS                    Status;
-  // Maximum number of entries + 1 becuase it is a 0's based value
-  UINT16                        QueueSize = Private->Cap.Mqes + 1;
+  UINT16                        QueueSize;
 
   Private    = (NVME_CONTROLLER_PRIVATE_DATA *)Context;
   QueueId    = 2;
   Cq         = Private->CqBuffer[QueueId] + Private->CqHdbl[QueueId].Cqh;
   HasNewItem = FALSE;
   PciIo      = Private->PciIo;
+
+  // Maximum number of queue entries
+  QueueSize = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes);
 
   //
   // Submit asynchronous subtasks to the NVMe Submission Queue
@@ -726,7 +728,7 @@ ProcessAsyncTaskList (
     }
 
     Private->CqHdbl[QueueId].Cqh++;
-    if (Private->CqHdbl[QueueId].Cqh > Private->Cap.Mqes) {
+    if (Private->CqHdbl[QueueId].Cqh > QueueSize) {
       Private->CqHdbl[QueueId].Cqh = 0;
       Private->Pt[QueueId]        ^= 1;
     }
@@ -956,10 +958,8 @@ NvmExpressDriverBindingStart (
   NVME_CONTROLLER_PRIVATE_DATA        *Private;
   EFI_DEVICE_PATH_PROTOCOL            *ParentDevicePath;
   UINT32                              NamespaceId;
-  EFI_PHYSICAL_ADDRESS                MappedAddr;
-  UINTN                               Bytes;
   EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL  *Passthru;
-  UINTN                               QueuePageCount = NVME_ALTERNATIVE_TOTAL_QUEUE_BUFFER_IN_PAGES; // why was the default value 6?
+  UINTN                               QueuePageCount;
 
   DEBUG ((DEBUG_INFO, "NvmExpressDriverBindingStart: start\n"));
 
@@ -1031,58 +1031,6 @@ NvmExpressDriverBindingStart (
       DEBUG ((DEBUG_WARN, "NvmExpressDriverBindingStart: failed to enable 64-bit DMA (%r)\n", Status));
     }
 
-    //
-    // Default: All queues are 1 page in size
-    // 6 x 4kB aligned buffers will be carved out of this buffer.
-    // 1st 4kB boundary is the start of the admin submission queue.
-    // 2nd 4kB boundary is the start of the admin completion queue.
-    // 3rd 4kB boundary is the start of I/O submission queue #1.
-    // 4th 4kB boundary is the start of I/O completion queue #1.
-    // 5th 4kB boundary is the start of I/O submission queue #2.
-    // 6th 4kB boundary is the start of I/O completion queue #2.
-    //
-    // Allocate 6 pages of memory, then map it for bus master read and write.
-    // ----------------------------------------------------------------------
-    //
-    // Alternative: Submission Queues are 4 pages in size.
-    // 15 x 4kB aligned buffers will be carved out of this buffer.
-    // 1st  4kB boundary is the start of the admin submission queue.
-    // 5th  4kB boundary is the start of the admin completion queue.
-    // 6th  4kB boundary is the start of I/O submission queue #1.
-    // 10th 4kB boundary is the start of I/O completion queue #1.
-    // 11th 4kB boundary is the start of I/O submission queue #2.
-    // 15th 4kB boundary is the start of I/O completion queue #2.
-    //
-    // Allocate 15 pages of memory, then map it for bus master read and write.
-    //
-    Status = PciIo->AllocateBuffer (
-                      PciIo,
-                      AllocateAnyPages,
-                      EfiBootServicesData,
-                      QueuePageCount,
-                      (VOID **)&Private->Buffer,
-                      0
-                      );
-    if (EFI_ERROR (Status)) {
-      goto Exit;
-    }
-
-    Bytes  = EFI_PAGES_TO_SIZE (QueuePageCount);
-    Status = PciIo->Map (
-                      PciIo,
-                      EfiPciIoOperationBusMasterCommonBuffer,
-                      Private->Buffer,
-                      &Bytes,
-                      &MappedAddr,
-                      &Private->Mapping
-                      );
-
-    if (EFI_ERROR (Status) || (Bytes != EFI_PAGES_TO_SIZE (QueuePageCount))) {
-      goto Exit;
-    }
-
-    Private->BufferPciAddr = (UINT8 *)(UINTN)MappedAddr;
-
     Private->Signature                 = NVME_CONTROLLER_PRIVATE_DATA_SIGNATURE;
     Private->ControllerHandle          = Controller;
     Private->ImageHandle               = This->DriverBindingHandle;
@@ -1098,7 +1046,7 @@ NvmExpressDriverBindingStart (
     InitializeListHead (&Private->AsyncPassThruQueue);
     InitializeListHead (&Private->UnsubmittedSubtasks);
 
-    Status = NvmeControllerInit (Private);
+    Status = NvmeControllerInit (Private, &QueuePageCount);
     if (EFI_ERROR (Status)) {
       goto Exit;
     }

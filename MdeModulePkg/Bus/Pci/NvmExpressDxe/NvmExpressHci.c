@@ -408,8 +408,8 @@ NvmeEnableController (
   //
   ZeroMem (&Cc, sizeof (NVME_CC));
   Cc.En     = 1;
-  Cc.Iosqes = 6;
-  Cc.Iocqes = 4;
+  Cc.Iosqes = NVME_IOSQES;
+  Cc.Iocqes = NVME_IOCQES;
 
   Status = WriteNvmeControllerConfiguration (Private, &Cc);
   if (EFI_ERROR (Status)) {
@@ -565,7 +565,7 @@ NvmeIdentifyNamespace (
 }
 
 /**
-  Create io completion queue.
+  Create I/O completion queues. An admin queue and NVME_MAX_QUEUES - 1 queues are created.
 
   @param  Private          The pointer to the NVME_CONTROLLER_PRIVATE_DATA data structure.
 
@@ -604,19 +604,11 @@ NvmeCreateIoCompletionQueue (
     CommandPacket.CommandTimeout = NVME_GENERIC_TIMEOUT;
     CommandPacket.QueueType      = NVME_ADMIN_QUEUE;
 
-    if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-      QueueSize = MIN (NVME_ALTERNATIVE_MAX_QUEUE_SIZE, Private->Cap.Mqes);
-    } else if (Index == 1) {
-      QueueSize = NVME_CCQ_SIZE;
-    } else if (Private->Cap.Mqes > NVME_ASYNC_CCQ_SIZE) {
-      QueueSize = NVME_ASYNC_CCQ_SIZE;
-    } else {
-      QueueSize = Private->Cap.Mqes;
-    }
+    QueueSize = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes);
 
     CrIoCq.Qid   = Index;
     CrIoCq.Qsize = QueueSize;
-    CrIoCq.Pc    = 1;
+    CrIoCq.Pc    = NVME_PHYSICALLY_CONTIGUOUS;
     CopyMem (&CommandPacket.NvmeCmd->Cdw10, &CrIoCq, sizeof (NVME_ADMIN_CRIOCQ));
     CommandPacket.NvmeCmd->Flags = CDW10_VALID | CDW11_VALID;
 
@@ -676,19 +668,11 @@ NvmeCreateIoSubmissionQueue (
     CommandPacket.CommandTimeout = NVME_GENERIC_TIMEOUT;
     CommandPacket.QueueType      = NVME_ADMIN_QUEUE;
 
-    if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-      QueueSize = MIN (NVME_ALTERNATIVE_MAX_QUEUE_SIZE, Private->Cap.Mqes);
-    } else if (Index == 1) {
-      QueueSize = NVME_CCQ_SIZE;
-    } else if (Private->Cap.Mqes > NVME_ASYNC_CCQ_SIZE) {
-      QueueSize = NVME_ASYNC_CCQ_SIZE;
-    } else {
-      QueueSize = Private->Cap.Mqes;
-    }
+    QueueSize = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes);
 
     CrIoSq.Qid   = Index;
     CrIoSq.Qsize = QueueSize;
-    CrIoSq.Pc    = 1;
+    CrIoSq.Pc    = NVME_PHYSICALLY_CONTIGUOUS;
     CrIoSq.Cqid  = Index;
     CrIoSq.Qprio = 0;
     CopyMem (&CommandPacket.NvmeCmd->Cdw10, &CrIoSq, sizeof (NVME_ADMIN_CRIOSQ));
@@ -711,6 +695,31 @@ NvmeCreateIoSubmissionQueue (
 }
 
 /**
+  Helper function to get queue size in pages
+  Asqs and acqs are the queue length, 0-based number. To calculate the number of pages needed,
+  we add 1 to the number of entries to make it 1-based and multiply by the size of the entry.
+
+  For the case of 63, we get 64 * 64 = 4096 bytes. For 4k pages this is 1 page.
+  For the case of 255, we get 256 * 64 = 16384 bytes. For 4k pages this is 4 pages
+
+  @param QueueLength          The number of entries in a queue. 0-based number.
+  @param QueueEntrySize       The size of each entry in the queue as a power of 2 (2^n).
+
+  @return QueueSizeInPages    The number of pages needed to store the queue.
+**/
+UINTN
+QueueSizeInPages (
+  IN UINT16  QueueLength,
+  IN UINTN   QueueEntrySize
+  )
+{
+  UINTN  QueueSizeInBytes = (QueueLength + 1) * (2^QueueEntrySize);
+  UINTN  QueurSizeInPages = EFI_SIZE_TO_PAGES (QueueSizeInBytes);
+
+  return QueueSizeInPages;
+}
+
+/**
   Initialize the Nvm Express controller.
 
   @param[in] Private                 The pointer to the NVME_CONTROLLER_PRIVATE_DATA data structure.
@@ -721,18 +730,23 @@ NvmeCreateIoSubmissionQueue (
 **/
 EFI_STATUS
 NvmeControllerInit (
-  IN NVME_CONTROLLER_PRIVATE_DATA  *Private
+  IN NVME_CONTROLLER_PRIVATE_DATA  *Private,
+  OUT UINTN                        *TotalQueueSizeInPages
   )
 {
-  EFI_STATUS           Status;
-  EFI_PCI_IO_PROTOCOL  *PciIo;
-  UINT64               Supports;
-  NVME_AQA             Aqa;
-  NVME_ASQ             Asq;
-  NVME_ACQ             Acq;
-  UINT16               VidDid[2];
-  UINT8                Sn[21];
-  UINT8                Mn[41];
+  EFI_STATUS            Status;
+  EFI_PCI_IO_PROTOCOL   *PciIo;
+  UINT64                Supports;
+  NVME_AQA              Aqa;
+  NVME_ASQ              Asq;
+  NVME_ACQ              Acq;
+  UINT16                VidDid[2];
+  UINT8                 Sn[21];
+  UINT8                 Mn[41];
+  UINTN                 Bytes;
+  EFI_PHYSICAL_ADDRESS  MappedAddr;
+  UINTN                 SqSizeInPages;
+  UINTN                 CqSizeInPages;
 
   PciIo = Private->PciIo;
 
@@ -824,12 +838,64 @@ NvmeControllerInit (
   }
 
   //
-  // set number of entries admin submission & completion queues.
+  // Set number of entries for admin submission & completion queues.
   //
-  Aqa.Asqs  = PcdGetBool (PcdSupportAlternativeQueueSize) ? MIN (NVME_ALTERNATIVE_MAX_QUEUE_SIZE, Private->Cap.Mqes) : NVME_ASQ_SIZE;
+  Aqa.Asqs  = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes);
   Aqa.Rsvd1 = 0;
-  Aqa.Acqs  = PcdGetBool (PcdSupportAlternativeQueueSize) ? MIN (NVME_ALTERNATIVE_MAX_QUEUE_SIZE, Private->Cap.Mqes) : NVME_ACQ_SIZE;
+  Aqa.Acqs  = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes);
   Aqa.Rsvd2 = 0;
+
+  //
+  // Calculate the size of queues in pages.
+  //
+  // Default: Submission Queues are 4 pages in size.
+  // 15 x 4kB aligned buffers will be carved out of this buffer.
+  // 1st  4kB boundary is the start of the admin submission queue.
+  // 5th  4kB boundary is the start of the admin completion queue.
+  // 6th  4kB boundary is the start of I/O submission queue #1.
+  // 10th 4kB boundary is the start of I/O completion queue #1.
+  // 11th 4kB boundary is the start of I/O submission queue #2.
+  // 15th 4kB boundary is the start of I/O completion queue #2.
+  SqSizeInPages         = QueueSizeInPages (Aqa.Asqs, NVME_IOSQES);
+  CqSizeInPages         = QueueSizeInPages (Aqa.Acqs, NVME_IOCQES);
+  *TotalQueueSizeInPages = (SqSizeInPages + CqSizeInPages) * NVME_MAX_QUEUES;
+
+  // Allocate buffer if not previosuly allocated (NvmExpressBlockIo call)
+  if (Private->Buffer == NULL) {
+    //
+    // Allocate TotalQueueSizeInPages pages of memory, then map it for bus master read and write.
+    //
+    Status = PciIo->AllocateBuffer (
+                      PciIo,
+                      AllocateAnyPages,
+                      EfiBootServicesData,
+                      *TotalQueueSizeInPages,
+                      (VOID **)&Private->Buffer,
+                      0
+                      );
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+
+    Bytes  = EFI_PAGES_TO_SIZE (*TotalQueueSizeInPages);
+    Status = PciIo->Map (
+                      PciIo,
+                      EfiPciIoOperationBusMasterCommonBuffer,
+                      Private->Buffer,
+                      &Bytes,
+                      &MappedAddr,
+                      &Private->Mapping
+                      );
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+
+    if ((Bytes != EFI_PAGES_TO_SIZE (*TotalQueueSizeInPages))) {
+      return EFI_DEVICE_ERROR;
+    }
+
+    Private->BufferPciAddr = (UINT8 *)(UINTN)MappedAddr;
+  }
 
   //
   // Address of admin submission queue.
@@ -839,44 +905,36 @@ NvmeControllerInit (
   //
   // Address of admin completion queue.
   //
-  if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-    Acq = (UINT64)(UINTN)(Private->BufferPciAddr + 4 * EFI_PAGE_SIZE) & ~0xFFF;
-  } else {
-    Acq = (UINT64)(UINTN)(Private->BufferPciAddr + EFI_PAGE_SIZE) & ~0xFFF;
-  }
+  Acq = (UINT64)(UINTN)(Private->BufferPciAddr + SqSizeInPages * EFI_PAGE_SIZE) & ~0xFFF;
 
   //
-  // Address of I/O submission & completion queue.
+  // Address of I/O submission & completion queues.
   //
-  if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-    ZeroMem (Private->Buffer, EFI_PAGES_TO_SIZE (NVME_ALTERNATIVE_TOTAL_QUEUE_BUFFER_IN_PAGES));
-    Private->SqBuffer[0]        = (NVME_SQ *)(UINTN)(Private->Buffer);
-    Private->SqBufferPciAddr[0] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr);
-    Private->CqBuffer[0]        = (NVME_CQ *)(UINTN)(Private->Buffer + 4 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[0] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 4 * EFI_PAGE_SIZE);
-    Private->SqBuffer[1]        = (NVME_SQ *)(UINTN)(Private->Buffer + 5 * EFI_PAGE_SIZE);
-    Private->SqBufferPciAddr[1] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + 5 * EFI_PAGE_SIZE);
-    Private->CqBuffer[1]        = (NVME_CQ *)(UINTN)(Private->Buffer + 9 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[1] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 9 * EFI_PAGE_SIZE);
-    Private->SqBuffer[2]        = (NVME_SQ *)(UINTN)(Private->Buffer + 10 * EFI_PAGE_SIZE);
-    Private->SqBufferPciAddr[2] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + 10 * EFI_PAGE_SIZE);
-    Private->CqBuffer[2]        = (NVME_CQ *)(UINTN)(Private->Buffer + 14 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[2] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 14 * EFI_PAGE_SIZE);
-  } else {
-    ZeroMem (Private->Buffer, EFI_PAGES_TO_SIZE (6));
-    Private->SqBuffer[0]        = (NVME_SQ *)(UINTN)(Private->Buffer);
-    Private->SqBufferPciAddr[0] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr);
-    Private->CqBuffer[0]        = (NVME_CQ *)(UINTN)(Private->Buffer + 1 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[0] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 1 * EFI_PAGE_SIZE);
-    Private->SqBuffer[1]        = (NVME_SQ *)(UINTN)(Private->Buffer + 2 * EFI_PAGE_SIZE);
-    Private->SqBufferPciAddr[1] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + 2 * EFI_PAGE_SIZE);
-    Private->CqBuffer[1]        = (NVME_CQ *)(UINTN)(Private->Buffer + 3 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[1] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 3 * EFI_PAGE_SIZE);
-    Private->SqBuffer[2]        = (NVME_SQ *)(UINTN)(Private->Buffer + 4 * EFI_PAGE_SIZE);
-    Private->SqBufferPciAddr[2] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + 4 * EFI_PAGE_SIZE);
-    Private->CqBuffer[2]        = (NVME_CQ *)(UINTN)(Private->Buffer + 5 * EFI_PAGE_SIZE);
-    Private->CqBufferPciAddr[2] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + 5 * EFI_PAGE_SIZE);
-  }
+  ZeroMem (Private->Buffer, EFI_PAGES_TO_SIZE (*TotalQueueSizeInPages));
+  UINTN  pageOffset = 0;
+
+  Private->SqBuffer[0]        = (NVME_SQ *)(UINTN)(Private->Buffer);
+  Private->SqBufferPciAddr[0] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr);
+
+  pageOffset                 += SqSizeInPages;
+  Private->CqBuffer[0]        = (NVME_CQ *)(UINTN)(Private->Buffer + pageOffset * EFI_PAGE_SIZE);
+  Private->CqBufferPciAddr[0] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + pageOffset * EFI_PAGE_SIZE);
+
+  pageOffset                 += CqSizeInPages;
+  Private->SqBuffer[1]        = (NVME_SQ *)(UINTN)(Private->Buffer + pageOffset * EFI_PAGE_SIZE);
+  Private->SqBufferPciAddr[1] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + pageOffset * EFI_PAGE_SIZE);
+
+  pageOffset                 += SqSizeInPages;
+  Private->CqBuffer[1]        = (NVME_CQ *)(UINTN)(Private->Buffer + pageOffset * EFI_PAGE_SIZE);
+  Private->CqBufferPciAddr[1] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + pageOffset * EFI_PAGE_SIZE);
+
+  pageOffset                 += CqSizeInPages;
+  Private->SqBuffer[2]        = (NVME_SQ *)(UINTN)(Private->Buffer + pageOffset * EFI_PAGE_SIZE);
+  Private->SqBufferPciAddr[2] = (NVME_SQ *)(UINTN)(Private->BufferPciAddr + pageOffset * EFI_PAGE_SIZE);
+
+  pageOffset                 += SqSizeInPages;
+  Private->CqBuffer[2]        = (NVME_CQ *)(UINTN)(Private->Buffer + pageOffset * EFI_PAGE_SIZE);
+  Private->CqBufferPciAddr[2] = (NVME_CQ *)(UINTN)(Private->BufferPciAddr + pageOffset * EFI_PAGE_SIZE);
 
   DEBUG ((DEBUG_INFO, "Private->Buffer = [%016X]\n", (UINT64)(UINTN)Private->Buffer));
   DEBUG ((DEBUG_INFO, "Admin     Submission Queue size (Aqa.Asqs) = [%08X]\n", Aqa.Asqs));

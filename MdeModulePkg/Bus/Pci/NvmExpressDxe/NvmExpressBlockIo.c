@@ -978,6 +978,7 @@ NvmeBlockIoReset (
   NVME_CONTROLLER_PRIVATE_DATA  *Private;
   NVME_DEVICE_PRIVATE_DATA      *Device;
   EFI_STATUS                    Status;
+  UINTN                         QueuePageCount;
 
   if (This == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -992,7 +993,7 @@ NvmeBlockIoReset (
 
   Private = Device->Controller;
 
-  Status = NvmeControllerInit (Private);
+  Status = NvmeControllerInit (Private, &QueuePageCount);
 
   if (EFI_ERROR (Status)) {
     Status = EFI_DEVICE_ERROR;
@@ -1234,6 +1235,7 @@ NvmeBlockIoResetEx (
   NVME_CONTROLLER_PRIVATE_DATA  *Private;
   BOOLEAN                       IsEmpty;
   EFI_TPL                       OldTpl;
+  UINTN                         QueuePageCount;
 
   if (This == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -1260,7 +1262,7 @@ NvmeBlockIoResetEx (
 
   OldTpl = gBS->RaiseTPL (TPL_CALLBACK);
 
-  Status = NvmeControllerInit (Private);
+  Status = NvmeControllerInit (Private, &QueuePageCount);
 
   if (EFI_ERROR (Status)) {
     Status = EFI_DEVICE_ERROR;

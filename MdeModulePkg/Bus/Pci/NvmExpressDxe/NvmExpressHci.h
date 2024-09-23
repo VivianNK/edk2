@@ -21,7 +21,8 @@
 /**
   Initialize the Nvm Express controller.
 
-  @param[in] Private                 The pointer to the NVME_CONTROLLER_PRIVATE_DATA data structure.
+  @param[in]  Private                The pointer to the NVME_CONTROLLER_PRIVATE_DATA data structure.
+  @param[out] TotalQueueSizeInPages  The number of pages allocated for the queue buffer.
 
   @retval EFI_SUCCESS                The NVM Express Controller is initialized successfully.
   @retval Others                     A device error occurred while initializing the controller.
@@ -29,7 +30,8 @@
 **/
 EFI_STATUS
 NvmeControllerInit (
-  IN NVME_CONTROLLER_PRIVATE_DATA  *Private
+  IN NVME_CONTROLLER_PRIVATE_DATA  *Private,
+  OUT UINTN                        *TotalQueueSizeInPages
   );
 
 /**

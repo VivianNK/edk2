@@ -481,6 +481,7 @@ NvmExpressPassThru (
   UINT32                         Data;
   NVME_PASS_THRU_ASYNC_REQ       *AsyncRequest;
   EFI_TPL                        OldTpl;
+  UINTN                          QueuePageCount;
 
   //
   // check the data fields in Packet parameter.
@@ -554,11 +555,7 @@ NvmExpressPassThru (
   TimerEvent  = NULL;
   Status      = EFI_SUCCESS;
 
-  if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-    QueueSize = MIN (NVME_ALTERNATIVE_MAX_QUEUE_SIZE, Private->Cap.Mqes) + 1;
-  } else {
-    QueueSize = MIN (NVME_ASYNC_CSQ_SIZE, Private->Cap.Mqes) + 1;
-  }
+  QueueSize = MIN (NVME_QUEUE_SIZE_DEFAULT, Private->Cap.Mqes) + 1;
 
   if (Packet->QueueType == NVME_ADMIN_QUEUE) {
     QueueId = 0;
@@ -735,19 +732,12 @@ NvmExpressPassThru (
     Sq->Payload.Raw.Cdw15 = Packet->NvmeCmd->Cdw15;
   }
 
-  if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-    Private->SqTdbl[QueueId].Sqt = (Private->SqTdbl[QueueId].Sqt + 1) % QueueSize;
-  } else {
-    //
-    // Ring the submission queue doorbell.
-    //
-    if ((Event != NULL) && (QueueId != 0)) {
-      Private->SqTdbl[QueueId].Sqt =
-        (Private->SqTdbl[QueueId].Sqt + 1) % QueueSize;
-    } else {
-      Private->SqTdbl[QueueId].Sqt ^= 1;
-    }
-  }
+  //
+  // Ring the submission queue doorbell to notify the controller that a new
+  // command is available.
+  // We don't care if the Event is NULL? Non-blocking I/O is not supported?
+  //
+  Private->SqTdbl[QueueId].Sqt = (Private->SqTdbl[QueueId].Sqt + 1) % QueueSize;
 
   Data   = ReadUnaligned32 ((UINT32 *)&Private->SqTdbl[QueueId]);
   Status = PciIo->Mem.Write (
@@ -859,7 +849,7 @@ NvmExpressPassThru (
     //
     // Reset the NVMe controller.
     //
-    Status = NvmeControllerInit (Private);
+    Status = NvmeControllerInit (Private, &QueuePageCount);
     if (!EFI_ERROR (Status)) {
       Status = AbortAsyncPassThruTasks (Private);
       if (!EFI_ERROR (Status)) {
@@ -881,15 +871,13 @@ NvmExpressPassThru (
     goto EXIT;
   }
 
-  if (PcdGetBool (PcdSupportAlternativeQueueSize)) {
-    Private->CqHdbl[QueueId].Cqh = (Private->CqHdbl[QueueId].Cqh + 1) % QueueSize;
-    if (Private->CqHdbl[QueueId].Cqh == 0) {
-      Private->Pt[QueueId] ^= 1;
-    }
-  } else {
-    if ((Private->CqHdbl[QueueId].Cqh ^= 1) == 0) {
-      Private->Pt[QueueId] ^= 1;
-    }
+  //
+  // Ring completion queue doorbell
+  // Why are we bitwise ORing the completion queue head with 1?
+  //
+  Private->CqHdbl[QueueId].Cqh = (Private->CqHdbl[QueueId].Cqh + 1) % QueueSize;
+  if (Private->CqHdbl[QueueId].Cqh == 0) {
+    Private->Pt[QueueId] ^= 1;
   }
 
   Data           = ReadUnaligned32 ((UINT32 *)&Private->CqHdbl[QueueId]);
