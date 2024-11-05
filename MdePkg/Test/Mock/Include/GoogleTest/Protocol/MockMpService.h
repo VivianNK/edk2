@@ -107,7 +107,7 @@ MOCK_FUNCTION_DEFINITION (MockMpService, SwitchBSP, 3, EFIAPI);
 MOCK_FUNCTION_DEFINITION (MockMpService, EnableDisableAP, 4, EFIAPI);
 MOCK_FUNCTION_DEFINITION (MockMpService, WhoAmI, 2, EFIAPI);
 
-static EFI_MP_SERVICES_PROTOCOL  MP_SERVICE_PROTOCOL_INSTANCE = {
+static EFI_MP_SERVICES_PROTOCOL  MpServicesProtocolMock = {
   GetNumberOfProcessors,
   GetProcessorInfo,
   StartupAllAPs,
@@ -118,7 +118,7 @@ static EFI_MP_SERVICES_PROTOCOL  MP_SERVICE_PROTOCOL_INSTANCE = {
 };
 
 extern "C" {
-  EFI_MP_SERVICES_PROTOCOL  *gMpServiceProtocol = &MP_SERVICE_PROTOCOL_INSTANCE;
+  EFI_MP_SERVICES_PROTOCOL  *gMpServiceProtocolMock = &MpServicesProtocolMock;
 }
 
 #endif // MOCK_MP_SERVICE_H_
