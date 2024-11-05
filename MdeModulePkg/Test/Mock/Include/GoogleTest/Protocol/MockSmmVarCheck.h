@@ -47,6 +47,12 @@ struct MockSmmVarCheck {
     );
 };
 
+/*
+//
+// This code needs to be copied to your test cpp file to instantiate the mock functions and mock
+// protocol instance.
+//
+
 MOCK_INTERFACE_DEFINITION (MockSmmVarCheck);
 MOCK_FUNCTION_DEFINITION (MockSmmVarCheck, SmmRegisterSetVariableCheckHandler, 1, EFIAPI);
 MOCK_FUNCTION_DEFINITION (MockSmmVarCheck, SmmVariablePropertySet, 3, EFIAPI);
@@ -58,8 +64,7 @@ EDKII_SMM_VAR_CHECK_PROTOCOL  EdkiiSmmVarCheckProtocolMock = {
   SmmVariablePropertyGet              // EDKII_VAR_CHECK_VARIABLE_PROPERTY_GET
 };
 
-extern "C" {
   EDKII_SMM_VAR_CHECK_PROTOCOL  *gEdkiiSmmVarCheckProtocolMock = &EdkiiSmmVarCheckProtocolMock;
-}
+*/
 
 #endif // MOCK_SMM_VAR_CHECK_H_
